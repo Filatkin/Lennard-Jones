@@ -6,11 +6,15 @@
 
 class Vector {
 public:
-    double x, y, z;
+    double x{}, y{}, z{};
 
     explicit Vector(double x, double y, double z);
 
+    explicit Vector();
+
     Vector operator*(const double &c) const;
+
+    Vector operator/(const double &c) const;
 
     Vector operator+(const Vector &v) const;
 

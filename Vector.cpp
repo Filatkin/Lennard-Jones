@@ -4,8 +4,14 @@ Vector::Vector(double x_, double y_, double z_) {
     x = x_, y = y_, z = z_;
 }
 
+Vector::Vector() = default;
+
 Vector Vector::operator*(const double &c) const {
     return Vector(x * c, y * c, z * c);
+}
+
+Vector Vector::operator/(const double &c) const {
+    return Vector(x / c, y / c, z / c);
 }
 
 Vector Vector::operator+(const Vector &v) const {
