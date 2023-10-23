@@ -1,0 +1,19 @@
+All parameters in Lennard-Jones coordinates:
+number of particles = 216, number of steps = 10000 (1000 for extra)
+time step = 0.005
+NVE (microcanonical) ensemble
+
+rho = 0.8, T_start = 1.25
+
+For radial distribution and velocity autocorrelation:
+
+NVT (Canonical) ensemble
+
+Gas:
+rho = 0.1, T_thermostat = 1
+
+Liquid:
+rho = 0.8, T_thermostat = 1.25
+
+Solid:
+rho = 1.2, T_thermostat = 1
