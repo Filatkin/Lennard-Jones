@@ -10,13 +10,13 @@ const int amountOfSymbolsBeforeRootDirectory = 8;
 const std::string DIR_PATH = FILE_PATH.substr(0, FILE_PATH.size() - amountOfSymbolsBeforeRootDirectory);
 
 //number of particles, integration steps, density
-const unsigned int N = 216, numOfSteps = 10000;
+const unsigned int N = 216, numOfSteps = 1000;
 // maximum number of particles along each coordinate
 const unsigned int n = std::ceil(std::cbrt(N));
 // integration step
 const double dt = 0.005;
 // mass of particles, lennard-jones parameters, reduced density (rho_reduced = rho_real / sigma^3), reduced temperature (tem_reduced = tem_real / epsilon)
-const double m = 1, sigma = 1, epsilon = 1, rho = 1.2, T_thermostat = 1;
+const double m = 1, sigma = 1, epsilon = 1, rho = 0.8, T_thermostat = 1.25;
 // turning NVT-ensemble
 const bool enable_NVT = true;
 // size of a box
@@ -208,7 +208,7 @@ int main() {
     for (unsigned int i = 0; i < numOfSteps / 2; i++) {
         outfile << vacf[i] << "," << norm[i] << "," << std::endl;
     }
-//  averaging data for pair correlation function
+//  writing data for pair correlation function
     for (unsigned int i = 0; i < N * (N - 1) * (numOfSteps + 1) / 2; i++) {
         outfile << dist_all[i] << ",";
     }

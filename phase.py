@@ -65,7 +65,7 @@ mfp_kin = np.array([])
 er_d = np.array([])
 mfp = np.array([])
 er_mfp = np.array([])
-file_names = ["data_gas.csv", "data_liquid.csv", "data_solid.csv"]
+file_names = ["data_gas2.csv", "data_liquid2.csv", "data_solid2.csv"]
 for file in file_names:
     with open(file, 'r') as data_file:
         data = list(csv.reader(data_file, delimiter=",", quoting=csv.QUOTE_NONNUMERIC))
@@ -110,7 +110,7 @@ print("Diffusion coefficient out of velocity auto-correlation function:", *[f"{a
 print("Difference between two methods (diffusion), %:                  ", *[f"{a:.3f}" for a in er_d])
 print("Mean free path out of diffusion coefficient in kinetic theory:  ", *[f"{a:.3f}" for a in mfp_kin])
 print("Mean free path out of gas kinetic theory:                       ", *[f"{a:.3f}" for a in mfp])
-print("Difference between two methods (mean free path), %:              ", *[f"{a:.3f}" for a in er_mfp])
+print("Difference between two methods (mean free path), %:             ", *[f"{a:.3f}" for a in er_mfp])
 axis2.plot(t[0: int(numOfSteps / 2)], zeros)
 axis3.plot(x, ones)
 axis1.legend(["gas", "liquid", "solid"])
