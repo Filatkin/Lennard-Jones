@@ -1,7 +1,7 @@
 #include <iostream>
 #include <fstream>
-#include <vector>
 #include <random>
+#include <array>
 #include "Vector.h"
 
 // getting data file path on the particular device
@@ -9,16 +9,17 @@ const std::string FILE_PATH = __FILE__;
 const int amountOfSymbolsBeforeRootDirectory = 8;
 const std::string DIR_PATH = FILE_PATH.substr(0, FILE_PATH.size() - amountOfSymbolsBeforeRootDirectory);
 
-//number of particles, integration steps, density
-const unsigned int N = 216, numOfSteps = 1000;
+//number of particles, integration steps, time between writing data for radial distribution function, size of the window and interval for sliding window algorithm, cut parameter to save rdf only after equilibration
+const unsigned int N = 216, numOfSteps = 10000, stepsBetweenWriting = numOfSteps / 100, windowSize =
+        numOfSteps / 5, interval = windowSize / 2, cutSteps = numOfSteps / 100;
 // maximum number of particles along each coordinate
 const unsigned int n = std::ceil(std::cbrt(N));
 // integration step
 const double dt = 0.005;
 // mass of particles, lennard-jones parameters, reduced density (rho_reduced = rho_real / sigma^3), reduced temperature (tem_reduced = tem_real / epsilon)
 const double m = 1, sigma = 1, epsilon = 1, rho = 0.8, T_thermostat = 1.25;
-// turning NVT-ensemble
-const bool enable_NVT = true;
+// usage of NVT-ensemble
+const bool enable_NVT = false;
 // size of a box
 const double step = 1 / std::cbrt(rho), L = n * step;
 //cut range
@@ -85,8 +86,8 @@ Vector periodicPosition(const Vector &r) {
 }
 
 // total interaction force and potential energy calculation
-std::pair<std::vector<Vector>, double> totalInteraction(const std::vector<Vector> &r, std::vector<double> &dist) {
-    double k = 0;
+std::pair<std::vector<Vector>, double>
+totalInteraction(const std::vector<Vector> &r, std::vector<double> &dist, const bool &writeDist) {
     // total force initialization
     std::vector<Vector> F(N, Vector(0, 0, 0));
     // total potential initialization
@@ -96,8 +97,8 @@ std::pair<std::vector<Vector>, double> totalInteraction(const std::vector<Vector
         for (unsigned int j = i + 1; j < N; j++) {
             Vector dr = periodicDist(r[i] - r[j]);
             const double r2 = dr * dr, r1 = std::sqrt(r2);
-            dist.emplace_back(r1);
-            k++;
+            if (writeDist)
+                dist.emplace_back(r1);
             if (r1 <= rc) {
                 const double r6 = r2 * r2 * r2, r8 = r6 * r2;
                 Vector Force = dr * (24 / r8 * (2 / r6 - 1) - Fc / r1);
@@ -110,18 +111,33 @@ std::pair<std::vector<Vector>, double> totalInteraction(const std::vector<Vector
     return std::make_pair(F, U);
 }
 
-// collecting and calculating data for velocity auto-correlation function
-std::pair<std::vector<double>, std::vector<double>>
-VelocityAutoCorrelationFunction(const std::vector<std::vector<Vector>> &V) {
-    std::vector<double> vacf(numOfSteps / 2, 0), norm = vacf;
+// mean squared displacement calculation using sliding window algorithm
+std::vector<double> MeanSquaredDisplacement(const std::vector<std::vector<Vector>> &r) {
+    std::vector<double> MSD(windowSize, 0);
     // fix t_delay = i * dt
-    for (unsigned int i = 0; i < numOfSteps / 2; i++)
+    for (unsigned int i = 0; i < windowSize; i++)
         // fix t0 = j * dt
-        for (unsigned int j = 0; j <= numOfSteps / 2; j++)
+        for (unsigned int j = 0; j < numOfSteps - interval; j += interval)
             // sum over particles
             for (unsigned int k = 0; k < N; k++) {
                 // vacf = <v(t0 + t_delay) * v(t0)>_t0,N
-                vacf[i] += V[j][k] * V[i + j][k];
+                MSD[i] += (r[j][k] - r[j + i][k]) * (r[j][k] - r[j + i][k]);
+            }
+    return MSD;
+}
+
+// velocity auto-correlation calculation using sliding window algorithm
+std::pair<std::vector<double>, std::vector<double>>
+VelocityAutoCorrelationFunction(const std::vector<std::vector<Vector>> &V) {
+    std::vector<double> vacf(windowSize, 0), norm = vacf;
+    // fix t_delay = i * dt
+    for (unsigned int i = 0; i < windowSize; i++)
+        // fix t0 = j * dt
+        for (unsigned int j = 0; j < numOfSteps - interval; j += interval)
+            // sum over particles
+            for (unsigned int k = 0; k < N; k++) {
+                // vacf = <v(t0 + t_delay) * v(t0)>_t0,N
+                vacf[i] += V[j][k] * V[j + i][k];
                 norm[i] += V[j][k] * V[j][k];
             }
     return std::make_pair(vacf, norm);
@@ -129,88 +145,114 @@ VelocityAutoCorrelationFunction(const std::vector<std::vector<Vector>> &V) {
 
 int main() {
 //  initialization;
-    std::vector<Vector> r = initCoord(), v = initVel(), v_mid = v, r0 = r, r_true = r0;
-    std::vector<std::vector<Vector>> v_all;
-    v_all.reserve(numOfSteps + 1);
-//  opening a file to write data, analyzed further in python
-    std::ofstream out_param_file(DIR_PATH + "parameters.csv");
-    out_param_file << N << "," << dt << "," << numOfSteps << "," << sigma << "," << epsilon << "," << m << std::endl;
-    out_param_file.close();
+    std::vector<Vector> r = initCoord(), v = initVel(), vMid = v, rTrue = r;
+
 //  data containers for further usage
     std::vector<double> dist_all;
-    std::pair<std::vector<Vector>, double> Total_old = totalInteraction(r, dist_all);
-    std::vector<Vector> F_old = Total_old.first;
+    dist_all.reserve((int(numOfSteps / stepsBetweenWriting) + 1) * N * (N - 1) / 2);
+    std::vector<std::vector<Vector>> v_all, r_all;
+    v_all.reserve(numOfSteps + 1);
+    r_all.reserve(numOfSteps + 1);
+    Vector P(0, 0, 0);
+    double Kin = 0;
+    std::array<double, numOfSteps + 1> allMomentum = {}, allKineticEnergy = {}, allPotentialEnergy = {};
+
 //  saving initial values
-    std::ofstream outfile(DIR_PATH + "data.csv");
-    outfile << rho << "," << T_thermostat << "," << L << std::endl;
-    Vector P_old(0, 0, 0);
-    double K_old = 0;
+    std::pair<std::vector<Vector>, double> TotalForceAndPotential = totalInteraction(r, dist_all, false);
+
     for (unsigned int i = 0; i < N; i++) {
-        P_old = P_old + v[i];
-        double v2 = v[i] * v[i];
-        outfile << std::sqrt(v2) << ",";
-        K_old += v2;
+        P = P + v[i];
+        Kin += v[i] * v[i];
     }
+    Kin *= 0.5;
     v_all.emplace_back(v);
-    double U_old = Total_old.second;
-    K_old *= 0.5;
-    outfile << std::sqrt(P_old * P_old) << "," << K_old << "," << U_old << "," << K_old + U_old << "," << 0
-            << std::endl;
-//  velocity verlet integration of motion equations
-    for (unsigned int k = 0; k < numOfSteps; k++) {
-//      kinetic energy initialization
-        double K = 0, MSD = 0;
-//      total momentum introduction
-        Vector P(0, 0, 0);
-//      first half-step of integration
+    r_all.emplace_back(rTrue);
+    allMomentum[0] = std::sqrt(P * P);
+    allKineticEnergy[0] = Kin;
+    allPotentialEnergy[0] = TotalForceAndPotential.second;
+
+//  velocity verlet (leap-frog) integration of motion equations
+    std::vector<Vector> F_old = TotalForceAndPotential.first;
+    bool writeDist;
+    for (unsigned int k = 1; k <= numOfSteps; k++) {
+        // kinetic energy initialization
+        Kin = 0;
+        // total momentum introduction
+        P = Vector(0, 0, 0);
+        // first half-step of integration
         for (unsigned int i = 0; i < N; i++) {
-            v_mid[i] = v[i] + F_old[i] * (0.5 * dt);
-            r[i] = periodicPosition(r[i] + v_mid[i] * dt);
-            r_true[i] = r_true[i] + v_mid[i] * dt;
-            MSD += (r_true[i] - r0[i]) * (r_true[i] - r0[i]);
+            vMid[i] = v[i] + F_old[i] * (0.5 * dt);
+            r[i] = periodicPosition(r[i] + vMid[i] * dt);
+            rTrue[i] = rTrue[i] + vMid[i] * dt;
         }
 //      new force calculation
-        std::pair<std::vector<Vector>, double> Total = totalInteraction(r, dist_all);
-        std::vector<Vector> F = Total.first;
+        if (k % stepsBetweenWriting == 0 && k > cutSteps)
+            writeDist = true;
+        else
+            writeDist = false;
+        TotalForceAndPotential = totalInteraction(r, dist_all, writeDist);
+        std::vector<Vector> F = TotalForceAndPotential.first;
 //      second half-step of integration
         for (unsigned int i = 0; i < N; i++) {
-            v[i] = v_mid[i] + F[i] * (0.5 * dt);
-//          write velocity in file
-            double v2 = v[i] * v[i];
-            outfile << std::sqrt(v2) << ",";
+            v[i] = vMid[i] + F[i] * (0.5 * dt);
 //          momentum calculation
             P = P + v[i];
 //          kinetic energy calculation
-            K += v2;
+            Kin += v[i] * v[i];
         }
+        Kin *= 0.5;
         F_old = F;
-        v_all.emplace_back(v);
 
-        K *= 0.5;
-//        velocity rescaling for NVE ensemble
-        double T = 2 * K / (N - 1) / 3;
-        double factor = std::sqrt(T_thermostat / T);
-        // std::cout << T << std::endl;
+        // velocity rescaling for NVE ensemble
         if (enable_NVT) {
+            double T = 2 * Kin / (N - 1) / 3;
+            double factor = std::sqrt(T_thermostat / T);
             for (unsigned int i = 0; i < N; i++) {
                 v[i] = v[i] * factor;
             }
         }
-        double U = Total.second;
-        // write in file
-        outfile << std::sqrt(P * P) << "," << K << "," << U << "," << K + U << "," << MSD / N << std::endl;
+
+        // saving
+        v_all.emplace_back(v);
+        r_all.emplace_back(rTrue);
+        allMomentum[k] = std::sqrt(P * P);
+        allKineticEnergy[k] = Kin;
+        allPotentialEnergy[k] = TotalForceAndPotential.second;
     }
+//  MSD calculation
+    std::vector<double> MSD = MeanSquaredDisplacement(r_all);
 //  VACF calculation
     std::pair<std::vector<double>, std::vector<double>> vacf_full = VelocityAutoCorrelationFunction(v_all);
     std::vector<double> vacf = vacf_full.first, norm = vacf_full.second;
 
-//  write in file data for VACF
-    for (unsigned int i = 0; i < numOfSteps / 2; i++) {
-        outfile << vacf[i] << "," << norm[i] << "," << std::endl;
-    }
-//  writing data for pair correlation function
-    for (unsigned int i = 0; i < N * (N - 1) * (numOfSteps + 1) / 2; i++) {
-        outfile << dist_all[i] << ",";
+//  writing in file
+    std::ofstream outfile(DIR_PATH + "data.txt");
+    outfile << N << "," << dt << "," << numOfSteps << "," << m << "," << sigma << "," << epsilon << "," << L << ","
+            << rho << "," << T_thermostat << "," << interval << "," << stepsBetweenWriting << ","  << cutSteps << "," << std::endl;
+    for (double &el: allMomentum)
+        outfile << el << ",";
+    outfile << std::endl;
+    for (double &el: allKineticEnergy)
+        outfile << el << ",";
+    outfile << std::endl;
+    for (double &el: allPotentialEnergy)
+        outfile << el << ",";
+    outfile << std::endl;
+    for (std::vector<Vector> &vel: v_all)
+        for (Vector &el: vel)
+            outfile << el.x << "," << el.y << "," << el.z << ",";
+    outfile << std::endl;
+    for (double &el: MSD)
+        outfile << el << ",";
+    outfile << std::endl;
+    for (double &el: vacf)
+        outfile << el << ",";
+    outfile << std::endl;
+    for (double &el: norm)
+        outfile << el << ",";
+    outfile << std::endl;
+    for (double &dist: dist_all) {
+        outfile << dist << ",";
     }
     outfile.close();
     return 0;

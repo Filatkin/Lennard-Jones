@@ -10,10 +10,13 @@ For radial distribution and velocity autocorrelation:
 NVT (Canonical) ensemble
 
 Gas:
+timeBetweenWriting = 10
 rho = 0.1, T_thermostat = 1
 
 Liquid:
+timeBetweenWriting = 100
 rho = 0.8, T_thermostat = 1.25
 
 Solid:
+timeBetweenWriting = 100
 rho = 1.2, T_thermostat = 1
